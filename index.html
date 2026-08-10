@@ -434,6 +434,209 @@
   </main>
 </div>
 
+<script>
+(() => {
+  const TOTAL = 10;
 
+  const config = {
+    easy:   { label:"Easy",   time:10, max:12, ops:["+", "-", "×"] },
+    medium: { label:"Medium", time:8,  max:25, ops:["+", "-", "×", "÷"] },
+    hard:   { label:"Hard",   time:6,  max:50, ops:["+", "-", "×", "÷"] }
+  };
+
+  const $ = id => document.getElementById(id);
+  let mode = "easy";
+  let question = 0;
+  let score = 0;
+  let correct = 0;
+  let combo = 0;
+  let bestCombo = 0;
+  let seconds = 10;
+  let answerValue = 0;
+  let timerId = null;
+  let locked = false;
+
+  function random(min,max){
+    return Math.floor(Math.random()*(max-min+1))+min;
+  }
+
+  function makeQuestion(){
+    const c = config[mode];
+    let a, b, op, result;
+
+    op = c.ops[random(0,c.ops.length-1)];
+
+    if(op === "+"){
+      a=random(1,c.max); b=random(1,c.max);
+      result=a+b;
+    } else if(op === "-"){
+      a=random(1,c.max); b=random(1,c.max);
+      if(b>a) [a,b]=[b,a];
+      result=a-b;
+    } else if(op === "×"){
+      const limit = mode === "hard" ? 18 : mode === "medium" ? 14 : 10;
+      a=random(2,limit); b=random(2,limit);
+      result=a*b;
+    } else {
+      b=random(2, mode === "hard" ? 15 : 10);
+      result=random(2, mode === "hard" ? 20 : 12);
+      a=b*result;
+    }
+
+    answerValue=result;
+    const eq = $("equation");
+    eq.classList.add("enter");
+    requestAnimationFrame(()=>{
+      eq.textContent=`${a} ${op} ${b}`;
+      requestAnimationFrame(()=>eq.classList.remove("enter"));
+    });
+  }
+
+  function selectMode(newMode){
+    mode = newMode;
+    document.querySelectorAll(".mode").forEach(x=>x.classList.toggle("active", x.dataset.mode===newMode));
+  }
+
+  function start(){
+    clearInterval(timerId);
+    question=0; score=0; correct=0; combo=0; bestCombo=0; locked=false;
+    $("score").textContent="0";
+    $("combo").textContent="×0";
+    $("combo").classList.remove("hot");
+    $("difficultyLabel").textContent=config[mode].label;
+    $("startScreen").classList.add("hidden");
+    $("resultScreen").classList.add("hidden");
+    $("gameScreen").classList.remove("hidden");
+    nextQuestion();
+  }
+
+  function nextQuestion(){
+    if(question >= TOTAL){
+      endGame();
+      return;
+    }
+
+    question++;
+    locked=false;
+    $("questionIndex").textContent=question;
+    $("progressBar").style.width=`${((question-1)/TOTAL)*100}%`;
+    $("feedback").textContent="";
+    $("feedback").className="feedback";
+    $("answer").value="";
+    makeQuestion();
+    $("answer").focus();
+    startTimer();
+  }
+
+  function startTimer(){
+    clearInterval(timerId);
+    seconds=config[mode].time;
+    updateTimer();
+
+    timerId=setInterval(()=>{
+      seconds--;
+      updateTimer();
+      if(seconds<=0){
+        clearInterval(timerId);
+        if(!locked) submit(true);
+      }
+    },1000);
+  }
+
+  function updateTimer(){
+    $("timer").textContent=seconds;
+    const pct=Math.max(0,(seconds/config[mode].time)*100);
+    $("timerRing").style.setProperty("--progress", pct+"%");
+    $("timerRing").classList.toggle("danger", seconds<=3);
+  }
+
+  function submit(timeout=false){
+    if(locked) return;
+    locked=true;
+    clearInterval(timerId);
+
+    const raw=$("answer").value.trim();
+    const userAnswer=Number(raw);
+    const isCorrect=!timeout && raw!=="" && Number.isFinite(userAnswer) && userAnswer===answerValue;
+
+    if(isCorrect){
+      correct++;
+      combo++;
+      bestCombo=Math.max(bestCombo,combo);
+      const bonus=Math.max(0,seconds-1)*2;
+      const gained=10+bonus+Math.min(combo*2,20);
+      score += gained;
+      $("feedback").textContent=`Correct! +${gained}`;
+      $("feedback").className="feedback correct";
+      $("questionCard").classList.remove("shake");
+      $("questionCard").classList.add("pop");
+      setTimeout(()=>$("questionCard").classList.remove("pop"),250);
+    } else {
+      combo=0;
+      $("feedback").textContent=timeout ? `Time's up — ${answerValue}` : `Not quite — ${answerValue}`;
+      $("feedback").className="feedback wrong";
+      $("questionCard").classList.remove("shake");
+      void $("questionCard").offsetWidth;
+      $("questionCard").classList.add("shake");
+    }
+
+    $("score").textContent=score;
+    $("combo").textContent=`×${combo}`;
+    $("combo").classList.toggle("hot", combo>=3);
+    $("progressBar").style.width=`${(question/TOTAL)*100}%`;
+
+    setTimeout(nextQuestion,700);
+  }
+
+  function endGame(){
+    clearInterval(timerId);
+    $("gameScreen").classList.add("hidden");
+    $("resultScreen").classList.remove("hidden");
+
+    const accuracy=Math.round((correct/TOTAL)*100);
+    const oldBest=Number(localStorage.getItem("numeraBest")||0);
+    const isNewBest = score>oldBest;
+    const best=Math.max(oldBest,score);
+    localStorage.setItem("numeraBest",best);
+
+    $("finalScore").textContent=score;
+    $("correctStat").textContent=`${correct}/${TOTAL}`;
+    $("accuracyStat").textContent=`${accuracy}%`;
+    $("bestStat").textContent=best;
+    $("newBest").classList.toggle("hidden", !isNewBest);
+
+    let title="Nice work.";
+    if(accuracy===100) title="Perfect run.";
+    else if(accuracy>=80) title="Sharp thinking.";
+    else if(accuracy>=60) title="Good effort.";
+    else title="Keep practicing.";
+    $("resultTitle").textContent=title;
+  }
+
+  document.querySelectorAll(".mode").forEach(btn=>{
+    btn.addEventListener("click",()=>selectMode(btn.dataset.mode));
+  });
+
+  document.addEventListener("keydown", e=>{
+    if(!$("startScreen").classList.contains("hidden")){
+      if(e.key==="1") selectMode("easy");
+      if(e.key==="2") selectMode("medium");
+      if(e.key==="3") selectMode("hard");
+      if(e.key==="Enter") start();
+    }
+  });
+
+  $("startBtn").addEventListener("click",start);
+  $("againBtn").addEventListener("click",start);
+  $("changeModeBtn").addEventListener("click",()=>{
+    $("resultScreen").classList.add("hidden");
+    $("startScreen").classList.remove("hidden");
+  });
+  $("submitBtn").addEventListener("click",()=>submit(false));
+  $("answer").addEventListener("keydown",e=>{
+    if(e.key==="Enter") submit(false);
+  });
+})();
+</script>
 </body>
 </html>
